@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(osascript:*)",
+      "Bash(python3:*)",
+      "Bash(npm install:*)",
+      "Bash(1 find /Users/jaythom/.expo -name \"*.tar*\" -o -name \"*.app\")",
+      "Bash(xcrun simctl:*)",
+      "Bash(curl:*)",
+      "Bash(lsof:*)",
+      "Bash(pkill:*)",
+      "Bash(echo:*)",
+      "Bash(ps:*)",
+      "Bash(watchman version:*)",
+      "Bash(# Write:*)",
+      "Bash(node -e:*)",
+      "Bash(timeout 5 /Users/jaythom/Desktop/swapspace/node_modules/.bin/expo start:*)",
+      "Bash(TaskOutput b676a0c)",
+      "Bash(brew list:*)",
+      "Bash(brew install:*)",
+      "Bash(watchman watch:*)",
+      "Bash(watchman get-sockname:*)",
+      "Bash(watchman watch-list:*)",
+      "Bash(time watchman --no-pretty get-sockname:*)",
+      "Bash(git:*)"
+    ]
+  }
+}
