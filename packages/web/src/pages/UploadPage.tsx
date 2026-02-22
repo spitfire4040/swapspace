@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { uploadPhoto } from '../api/photo.api';
+import { uploadPhoto, getMyPhotos, deletePhoto, Photo } from '../api/photo.api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 
@@ -13,6 +13,34 @@ export default function UploadPage() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const [myPhotos, setMyPhotos] = useState<Photo[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const fetchMyPhotos = useCallback(async () => {
+    try {
+      const { photos } = await getMyPhotos();
+      setMyPhotos(photos);
+    } catch {
+      // silently ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMyPhotos();
+  }, [fetchMyPhotos]);
+
+  const handleDelete = async (photoId: string) => {
+    setDeletingId(photoId);
+    try {
+      await deletePhoto(photoId);
+      setMyPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    } catch {
+      // silently ignore
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -38,6 +66,7 @@ export default function UploadPage() {
       setPreview(null);
       setCaption('');
       if (inputRef.current) inputRef.current.value = '';
+      fetchMyPhotos();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -111,6 +140,36 @@ export default function UploadPage() {
             Upload Photo
           </Button>
         </form>
+
+        {myPhotos.length > 0 && (
+          <section className="mt-10">
+            <h3 className="text-lg font-bold text-gray-800 mb-4">Your Photos ({myPhotos.length})</h3>
+            <div className="grid grid-cols-3 gap-3">
+              {myPhotos.map((photo) => (
+                <div key={photo.id} className="relative group aspect-square">
+                  <img
+                    src={photo.thumbnailUrl}
+                    alt={photo.caption ?? ''}
+                    className="w-full h-full object-cover rounded-xl"
+                  />
+                  {photo.caption && (
+                    <p className="absolute bottom-0 left-0 right-0 text-xs text-white bg-black/50 px-2 py-1 rounded-b-xl truncate">
+                      {photo.caption}
+                    </p>
+                  )}
+                  <button
+                    onClick={() => handleDelete(photo.id)}
+                    disabled={deletingId === photo.id}
+                    className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-40"
+                    aria-label="Delete photo"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
