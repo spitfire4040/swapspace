@@ -14,3 +14,6 @@ packages/app/android/
 
 # Capacitor env (contains local IP)
 packages/app/.env.capacitor
+
+# Claude Code local settings
+.claude/settings.local.json
