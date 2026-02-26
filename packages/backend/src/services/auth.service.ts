@@ -1,11 +1,5 @@
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
-import pool from '../config/db';
-import { JwtPayload } from '../middleware/auth';
+import { supabaseAdmin } from '../config/supabase';
 import { createError } from '../middleware/errorHandler';
-
-const SALT_ROUNDS = 12;
 
 export interface TokenPair {
   accessToken: string;
@@ -19,55 +13,73 @@ export interface UserRecord {
   created_at: string;
 }
 
-function signAccess(payload: JwtPayload): string {
-  return jwt.sign(payload, process.env.JWT_ACCESS_SECRET!, {
-    expiresIn: (process.env.JWT_ACCESS_EXPIRES_IN ?? '15m') as jwt.SignOptions['expiresIn'],
-  });
-}
-
-function signRefresh(payload: JwtPayload): string {
-  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET!, {
-    expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') as jwt.SignOptions['expiresIn'],
-  });
-}
-
-function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-async function storeRefreshToken(userId: string, rawToken: string): Promise<void> {
-  const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 30);
-
-  await pool.query(
-    'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-    [userId, tokenHash, expiresAt]
-  );
-}
-
-async function issueTokens(userId: string, email: string): Promise<TokenPair> {
-  const payload: JwtPayload = { userId, email };
-  const accessToken = signAccess(payload);
-  const refreshToken = signRefresh(payload);
-  await storeRefreshToken(userId, refreshToken);
-  return { accessToken, refreshToken };
-}
-
 export async function register(
   email: string,
   username: string,
   password: string
 ): Promise<{ user: UserRecord; tokens: TokenPair }> {
-  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+  const normalizedUsername = username.trim().toLowerCase();
 
-  const result = await pool.query<UserRecord>(
-    'INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING id, email, username, created_at',
-    [email.toLowerCase(), username.trim(), passwordHash]
-  );
+  // Pre-check username uniqueness (UX convenience — also caught by DB constraint)
+  const { data: existing } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .eq('username', normalizedUsername)
+    .single();
 
-  const user = result.rows[0];
-  const tokens = await issueTokens(user.id, user.email);
+  if (existing) {
+    throw createError(409, 'Email or username already in use');
+  }
+
+  // Create user in Supabase Auth (trigger auto-creates profile)
+  // email_confirm: true skips email verification — intentional for current dev stage
+  const { data: authData, error: createError_ } = await supabaseAdmin.auth.admin.createUser({
+    email: email.toLowerCase(),
+    password,
+    email_confirm: true,
+    user_metadata: { username: normalizedUsername },
+  });
+
+  if (createError_) {
+    if (
+      createError_.message.includes('already been registered') ||
+      createError_.message.includes('23505') ||
+      createError_.message.includes('unique')
+    ) {
+      throw createError(409, 'Email or username already in use');
+    }
+    console.error('Registration error:', createError_.message);
+    throw createError(400, 'Registration failed');
+  }
+
+  // Sign in to get session tokens
+  // Note: signInWithPassword on the admin client works but is unconventional;
+  // it's used here to obtain a session after admin-created user signup.
+  const { data: session, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+    email: email.toLowerCase(),
+    password,
+  });
+
+  if (signInError || !session.session) {
+    // Clean up orphaned auth user if sign-in fails
+    await supabaseAdmin.auth.admin.deleteUser(authData.user.id).catch((err) => {
+      console.error('Failed to clean up orphaned user:', err);
+    });
+    throw createError(500, 'Failed to create session after registration');
+  }
+
+  const user: UserRecord = {
+    id: authData.user.id,
+    email: authData.user.email!,
+    username: normalizedUsername,
+    created_at: authData.user.created_at,
+  };
+
+  const tokens: TokenPair = {
+    accessToken: session.session.access_token,
+    refreshToken: session.session.refresh_token,
+  };
+
   return { user, tokens };
 }
 
@@ -75,48 +87,61 @@ export async function login(
   email: string,
   password: string
 ): Promise<{ user: UserRecord; tokens: TokenPair }> {
-  const result = await pool.query<UserRecord & { password_hash: string }>(
-    'SELECT id, email, username, password_hash, created_at FROM users WHERE email = $1',
-    [email.toLowerCase()]
-  );
+  const { data: session, error } = await supabaseAdmin.auth.signInWithPassword({
+    email: email.toLowerCase(),
+    password,
+  });
 
-  const user = result.rows[0];
-  if (!user) throw createError(401, 'Invalid email or password');
+  if (error || !session.session) {
+    throw createError(401, 'Invalid email or password');
+  }
 
-  const valid = await bcrypt.compare(password, user.password_hash);
-  if (!valid) throw createError(401, 'Invalid email or password');
+  const username =
+    session.user.user_metadata?.username ??
+    (
+      await supabaseAdmin
+        .from('profiles')
+        .select('username')
+        .eq('id', session.user.id)
+        .single()
+    ).data?.username ??
+    '';
 
-  const tokens = await issueTokens(user.id, user.email);
-  const { password_hash: _pw, ...safeUser } = user;
-  return { user: safeUser as UserRecord, tokens };
+  const user: UserRecord = {
+    id: session.user.id,
+    email: session.user.email!,
+    username,
+    created_at: session.user.created_at,
+  };
+
+  const tokens: TokenPair = {
+    accessToken: session.session.access_token,
+    refreshToken: session.session.refresh_token,
+  };
+
+  return { user, tokens };
 }
 
-export async function refresh(rawRefreshToken: string): Promise<TokenPair> {
-  let payload: JwtPayload;
-  try {
-    payload = jwt.verify(rawRefreshToken, process.env.JWT_REFRESH_SECRET!) as JwtPayload;
-  } catch {
+export async function refresh(refreshToken: string): Promise<TokenPair> {
+  const { data, error } = await supabaseAdmin.auth.refreshSession({
+    refresh_token: refreshToken,
+  });
+
+  if (error || !data.session) {
     throw createError(401, 'Invalid or expired refresh token');
   }
 
-  const tokenHash = hashToken(rawRefreshToken);
-  const result = await pool.query(
-    'SELECT id, revoked FROM refresh_tokens WHERE token_hash = $1 AND expires_at > NOW()',
-    [tokenHash]
-  );
-
-  const storedToken = result.rows[0];
-  if (!storedToken || storedToken.revoked) {
-    throw createError(401, 'Refresh token not found or revoked');
-  }
-
-  // Rotate: revoke old, issue new
-  await pool.query('UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1', [storedToken.id]);
-
-  return issueTokens(payload.userId, payload.email);
+  return {
+    accessToken: data.session.access_token,
+    refreshToken: data.session.refresh_token,
+  };
 }
 
-export async function logout(rawRefreshToken: string): Promise<void> {
-  const tokenHash = hashToken(rawRefreshToken);
-  await pool.query('UPDATE refresh_tokens SET revoked = TRUE WHERE token_hash = $1', [tokenHash]);
+// Accepts the user's access token (JWT) to sign out the current session.
+// supabaseAdmin.auth.admin.signOut() expects a JWT string, not a userId.
+export async function logout(accessToken: string): Promise<void> {
+  const { error } = await supabaseAdmin.auth.admin.signOut(accessToken, 'local');
+  if (error) {
+    throw createError(500, 'Failed to log out');
+  }
 }

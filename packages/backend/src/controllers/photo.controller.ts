@@ -13,6 +13,9 @@ export async function uploadPhoto(req: Request, res: Response, next: NextFunctio
     if (!req.file) return next(createError(400, 'No photo file provided'));
 
     const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() : undefined;
+    if (caption && caption.length > 500) {
+      return next(createError(400, 'Caption must be 500 characters or fewer'));
+    }
     const photo = await photoService.createPhoto(req.user!.userId, req.file, caption);
     res.status(201).json(photo);
   } catch (err) {

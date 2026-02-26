@@ -1,24 +1,21 @@
 import 'dotenv/config';
-import fs from 'fs';
-import path from 'path';
-import pool from './config/db';
+import { supabaseAdmin } from './config/supabase';
 import { createApp } from './app';
-
-// Ensure upload directories exist
-const uploadDirs = [
-  path.join(process.cwd(), 'uploads', 'originals'),
-  path.join(process.cwd(), 'uploads', 'thumbnails'),
-];
-for (const dir of uploadDirs) {
-  fs.mkdirSync(dir, { recursive: true });
-}
 
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 
 async function start() {
-  // Verify DB connection
-  await pool.query('SELECT 1');
-  console.log('Database connected');
+  // Validate required env vars
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
+  }
+
+  // Verify Supabase connection
+  const { error } = await supabaseAdmin.from('profiles').select('id').limit(1);
+  if (error) {
+    throw new Error(`Supabase connection failed: ${error.message}`);
+  }
+  console.log('Supabase connected');
 
   const app = createApp();
   app.listen(PORT, () => {

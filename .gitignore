@@ -2,7 +2,15 @@ node_modules/
 dist/
 build/
 .env
-packages/backend/uploads/
 *.log
 .DS_Store
-.expo/
+
+# MCP config (contains local paths)
+.mcp.json
+
+# Capacitor native projects (generated, large binaries)
+packages/app/ios/
+packages/app/android/
+
+# Capacitor env (contains local IP)
+packages/app/.env.capacitor

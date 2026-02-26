@@ -32,14 +32,7 @@ export async function register(req: Request, res: Response, next: NextFunction):
     );
 
     res.status(201).json({ user, ...tokens });
-  } catch (err: unknown) {
-    if (
-      err instanceof Error &&
-      'code' in err &&
-      (err as NodeJS.ErrnoException).code === '23505'
-    ) {
-      return next(createError(409, 'Email or username already in use'));
-    }
+  } catch (err) {
     next(err);
   }
 }
@@ -74,12 +67,8 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
 
 export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const body = refreshSchema.safeParse(req.body);
-    if (!body.success) {
-      return next(createError(400, 'refreshToken is required'));
-    }
-
-    await authService.logout(body.data.refreshToken);
+    const token = req.headers.authorization!.slice(7);
+    await authService.logout(token);
     res.json({ message: 'Logged out' });
   } catch (err) {
     next(err);

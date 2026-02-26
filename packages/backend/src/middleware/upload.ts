@@ -1,21 +1,11 @@
 import multer from 'multer';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { Request } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { createError } from './errorHandler';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, path.join(process.cwd(), 'uploads', 'originals'));
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    cb(null, `${uuidv4()}${ext}`);
-  },
-});
+const storage = multer.memoryStorage();
 
 const fileFilter = (
   _req: Request,
@@ -34,3 +24,26 @@ export const upload = multer({
   fileFilter,
   limits: { fileSize: MAX_FILE_SIZE },
 });
+
+/**
+ * Validates the actual file content by reading magic bytes.
+ * Must be used after multer has parsed the upload.
+ */
+export async function validateFileType(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  if (!req.file) return next();
+
+  try {
+    const { fileTypeFromBuffer } = await import('file-type');
+    const result = await fileTypeFromBuffer(req.file.buffer);
+
+    if (!result || !ALLOWED_MIME_TYPES.includes(result.mime)) {
+      return next(createError(400, 'Only JPEG, PNG, and WebP images are allowed'));
+    }
+
+    // Overwrite the client-supplied mimetype with the detected one
+    req.file.mimetype = result.mime;
+    next();
+  } catch {
+    return next(createError(400, 'Unable to determine file type'));
+  }
+}

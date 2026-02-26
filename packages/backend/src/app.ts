@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import path from 'path';
 import authRoutes from './routes/auth.routes';
 import photoRoutes from './routes/photo.routes';
 import swipeRoutes from './routes/swipe.routes';
@@ -14,9 +13,20 @@ export function createApp(): express.Application {
   app.use(helmet());
 
   // CORS — must come before routes
+  const allowedOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+    .split(',')
+    .map((o) => o.trim());
   app.use(
     cors({
-      origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+      origin: (origin, callback) => {
+        // Allow requests with no origin header (native apps, curl, same-origin)
+        // but reject literal "null" string origin (e.g. sandboxed iframes)
+        if (origin === undefined || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       credentials: true,
     })
   );
@@ -24,14 +34,6 @@ export function createApp(): express.Application {
   // Body parsers
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
-
-  // Static file serving for uploads (UUID filenames, not guessable)
-  app.use(
-    '/uploads',
-    express.static(path.join(process.cwd(), 'uploads'), {
-      maxAge: '7d',
-    })
-  );
 
   // Health check
   app.get('/health', (_req, res) => {

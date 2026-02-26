@@ -7,11 +7,12 @@
   ],
   "scripts": {
     "dev:backend": "npm run dev --workspace=packages/backend",
-    "dev:web": "npm run dev --workspace=packages/web",
+    "dev:app": "npm run dev --workspace=packages/app",
     "build:backend": "npm run build --workspace=packages/backend",
-    "build:web": "npm run build --workspace=packages/web"
-  },
-  "dependencies": {
-    "@react-native-community/cli-debugger-ui": "^13.6.9"
+    "build:app": "npm run build --workspace=packages/app",
+    "build:cap": "npm run build:cap --workspace=packages/app",
+    "cap:sync": "npm run cap:sync --workspace=packages/app",
+    "cap:ios": "npm run cap:ios --workspace=packages/app",
+    "cap:android": "npm run cap:android --workspace=packages/app"
   }
 }
